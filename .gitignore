@@ -1,0 +1,10 @@
+# Build outputs
+*.exe
+dist/
+
+# IDE / virtualenv
+.idea/
+
+# OS
+Thumbs.db
+.DS_Store
