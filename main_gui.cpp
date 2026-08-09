@@ -1,33 +1,31 @@
-// OpenCode Session Manager -- GUI (Dear ImGui + SDL3 + OpenGL3)
-// Desktop tool to browse and clean old OpenCode conversations & snapshot orphans,
-// with session-id copy and one-click resume (jump into a session).
+// OpenCode Session Manager - GUI (Dear ImGui + Win32 + OpenGL3)
+// Desktop tool to browse old OpenCode sessions & snapshots clean stuff,
+// with session-.-copy and one-click resume (jump into a session).
 //
-// Build (MinGW-w64 + sqlite3 from C:\MinGW\opt + bundled SDL3):
-//   g++ -std=c++17 -O2 -I imgui -I imgui/backends -I third_party/SDL3/include
+// No bundled DLLs: uses only Windows system libraries (opengl32.dll etc.).
+// Build (MinGW-w64 + sqlite3 from C:\MinGW\opt):
+//   g++ -std=c++17 -O2 -I imgui -I imgui/backends
 //        -I "C:\MinGW\opt\include"
 //        main_gui.cpp opencode_data.cpp
 //        imgui/imgui.cpp imgui/imgui_draw.cpp imgui/imgui_tables.cpp
 //        imgui/imgui_widgets.cpp
-//        imgui/backends/imgui_impl_sdl3.cpp imgui/backends/imgui_impl_opengl3.cpp
-//        -L third_party/SDL3/lib -lSDL3 -lopengl32 -L "C:\MinGW\opt\lib" -lsqlite3
-//        -o opencode-session-manager-gui.exe
+//        imgui/backends/imgui_impl_win32.cpp imgui/backends/imgui_impl_opengl3.cpp
+//        -L "C:\MinGW\opt\lib" -lsqlite3 -lopengl32 -ldwmapi -o opencode-session-manager-gui.exe
 //
 // Optional env override for data location (handy for testing):
 //   OPENCODE_DATA_DIR=<dir containing opencode.db, storage/, snapshot/>
 
-#define NCURSES_WIDECHAR 1   // keep this out of the way (harmless)
+#define WIN32_LEAN_AND_MEAN 1
+#define NCURSES_WIDECHAR 1  // keep this out of the way (harmless)
 
-#ifdef _WIN32
 #include <windows.h>
-#endif
+#include <tchar.h>
 
 #include "imgui.h"
-#include "imgui_impl_sdl3.h"
+#include "imgui_impl_win32.h"
 #include "imgui_impl_opengl3.h"
-#include <SDL3/SDL.h>
-#include <SDL3/SDL_main.h>
-#include <SDL3/SDL_opengl.h>
 
+#include <GL/gl.h>
 #include <cstdio>
 #include <set>
 #include <string>
@@ -407,49 +405,137 @@ static void draw_ui() {
 }
 
 // ---------------------------------------------------------------------------
-// main
+// Win32 window + WGL (OpenGL 3.0 core) plumbing
 // ---------------------------------------------------------------------------
-int main(int, char**) {
+extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
+
+static HWND g_hwnd = nullptr;
+static HDC  g_hdc  = nullptr;
+
+static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    if (ImGui_ImplWin32_WndProcHandler(hwnd, msg, wParam, lParam))
+        return true;
+
+    switch (msg) {
+    case WM_ERASEBKGND:
+        return 1;           // don't flicker; we repaint every frame
+    case WM_DESTROY:
+        PostQuitMessage(0);
+        return 0;
+    default:
+        return DefWindowProc(hwnd, msg, wParam, lParam);
+    }
+}
+
+// WGL_ARB_create_context constants (avoid dragging in <GL/wglext.h>)
+#define WGL_CONTEXT_MAJOR_VERSION_ARB 0x2091
+#define WGL_CONTEXT_MINOR_VERSION_ARB 0x2092
+#define WGL_CONTEXT_FLAGS_ARB         0x2094
+#define WGL_CONTEXT_PROFILE_MASK_ARB  0x9126
+#define WGL_CONTEXT_CORE_PROFILE_BIT_ARB 0x00000001
+
+typedef HGLRC (WINAPI* PFN_wglCreateContextAttribsARB)(HDC, HGLRC, const int*);
+static PFN_wglCreateContextAttribsARB wglCreateContextAttribsARB = nullptr;
+
+static HGLRC create_gl_context(HWND hwnd) {
+    g_hdc = GetDC(hwnd);
+    if (!g_hdc)
+        return nullptr;
+
+    PIXELFORMATDESCRIPTOR pfd = {};
+    pfd.nSize        = sizeof(pfd);
+    pfd.nVersion     = 1;
+    pfd.dwFlags      = PFD_DRAW_TO_WINDOW | PFD_SUPPORT_OPENGL | PFD_DOUBLEBUFFER;
+    pfd.iPixelType   = PFD_TYPE_RGBA;
+    pfd.cColorBits   = 24;
+    pfd.cDepthBits   = 24;
+    pfd.cStencilBits = 8;
+    pfd.iLayerType   = PFD_MAIN_PLANE;
+
+    const int pixel_format = ChoosePixelFormat(g_hdc, &pfd);
+    if (pixel_format == 0 || !SetPixelFormat(g_hdc, pixel_format, &pfd))
+        return nullptr;
+
+    // probe wglCreateContextAttribsARB via a temporary 1.1 context
+    HGLRC probe = wglCreateContext(g_hdc);
+    if (!probe)
+        return nullptr;
+    wglMakeCurrent(g_hdc, probe);
+    wglCreateContextAttribsARB =
+        (PFN_wglCreateContextAttribsARB)wglGetProcAddress("wglCreateContextAttribsARB");
+
+    HGLRC gl_context = nullptr;
+    if (wglCreateContextAttribsARB) {
+        const int attribs[] = {
+            WGL_CONTEXT_MAJOR_VERSION_ARB, 3,
+            WGL_CONTEXT_MINOR_VERSION_ARB, 0,
+            WGL_CONTEXT_PROFILE_MASK_ARB,  WGL_CONTEXT_CORE_PROFILE_BIT_ARB,
+            WGL_CONTEXT_FLAGS_ARB,         0,
+            0
+        };
+        gl_context = wglCreateContextAttribsARB(g_hdc, nullptr, attribs);
+    }
+    if (gl_context == nullptr)
+        gl_context = wglCreateContext(g_hdc);      // fallback: legacy GL 1.x
+
+    wglMakeCurrent(nullptr, nullptr);
+    wglDeleteContext(probe);
+
+    if (gl_context == nullptr || !wglMakeCurrent(g_hdc, gl_context)) {
+        if (gl_context)
+            wglDeleteContext(gl_context);
+        return nullptr;
+    }
+    return gl_context;
+}
+
+// ---------------------------------------------------------------------------
+// WinMain
+// ---------------------------------------------------------------------------
+int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
+    // Per-monitor DPI awareness (best font / OpenGL scaling on HiDPI).
+    ImGui_ImplWin32_EnableDpiAwareness();
+
     if (!path_exists(GUI_DB_PATH)) {
         fprintf(stderr, "Database not found: %s\n", GUI_DB_PATH.c_str());
-        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "OpenCode Session Manager",
-                                 ("Database not found:\n" + GUI_DB_PATH).c_str(), nullptr);
+        MessageBoxA(nullptr, ("Database not found:\n" + GUI_DB_PATH).c_str(),
+                    "OpenCode Session Manager", MB_ICONERROR);
         return 1;
     }
 
-    if (!SDL_Init(SDL_INIT_VIDEO)) {
-        fprintf(stderr, "Error: SDL_Init(): %s\n", SDL_GetError());
+    WNDCLASSEXW wc = {};
+    wc.cbSize        = sizeof(wc);
+    wc.style         = CS_CLASSDC;
+    wc.lpfnWndProc   = WndProc;
+    wc.hInstance     = hInstance;
+    wc.lpszClassName = L"OpenCodeSessionManagerWnd";
+    if (!RegisterClassExW(&wc)) {
+        fprintf(stderr, "Error: RegisterClassExW() failed.\n");
         return 1;
     }
 
-    // GL 3.0 + GLSL 130 (portable, matches imgui_impl_opengl3 defaults)
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_FLAGS, 0);
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
-    SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
-    SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
-    SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, 8);
-
-    float main_scale = SDL_GetDisplayContentScale(SDL_GetPrimaryDisplay());
-    SDL_WindowFlags window_flags = SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE |
-                                   SDL_WINDOW_HIDDEN | SDL_WINDOW_HIGH_PIXEL_DENSITY;
-    SDL_Window* window = SDL_CreateWindow("OpenCode Session Manager",
-                                          (int)(1100 * main_scale), (int)(720 * main_scale),
-                                          window_flags);
+    HWND window = CreateWindowExW(0, wc.lpszClassName, L"OpenCode Session Manager",
+                                  WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, 1100, 720,
+                                  nullptr, nullptr, hInstance, nullptr);
     if (window == nullptr) {
-        fprintf(stderr, "Error: SDL_CreateWindow(): %s\n", SDL_GetError());
+        fprintf(stderr, "Error: CreateWindowExW() failed.\n");
         return 1;
     }
-    SDL_GLContext gl_context = SDL_GL_CreateContext(window);
+    g_hwnd = window;
+
+    HGLRC gl_context = create_gl_context(window);
     if (gl_context == nullptr) {
-        fprintf(stderr, "Error: SDL_GL_CreateContext(): %s\n", SDL_GetError());
+        fprintf(stderr, "Error: could not create OpenGL context.\n");
         return 1;
     }
-    SDL_GL_MakeCurrent(window, gl_context);
-    SDL_GL_SetSwapInterval(1);
-    SDL_SetWindowPosition(window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
-    SDL_ShowWindow(window);
+
+    float main_scale = ImGui_ImplWin32_GetDpiScaleForHwnd(window);
+    if (main_scale <= 0.0f)
+        main_scale = 1.0f;
+
+    ShowWindow(window, nCmdShow);
+    SetWindowPos(window, nullptr, 0, 0, (int)(1100 * main_scale), (int)(720 * main_scale),
+                 SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
 
     // Setup Dear ImGui context
     IMGUI_CHECKVERSION();
@@ -487,7 +573,7 @@ int main(int, char**) {
     if (!cjk_font)
         io.Fonts->AddFontDefault();
 
-    ImGui_ImplSDL3_InitForOpenGL(window, gl_context);
+    ImGui_ImplWin32_InitForOpenGL(window);
     ImGui_ImplOpenGL3_Init("#version 130");
 
     refresh_data(false);
@@ -495,22 +581,23 @@ int main(int, char**) {
 
     bool done = false;
     while (!done) {
-        SDL_Event event;
-        while (SDL_PollEvent(&event)) {
-            ImGui_ImplSDL3_ProcessEvent(&event);
-            if (event.type == SDL_EVENT_QUIT) done = true;
-            if (event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED &&
-                event.window.windowID == SDL_GetWindowID(window))
+        MSG msg;
+        while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
+            TranslateMessage(&msg);
+            DispatchMessageW(&msg);
+            if (msg.message == WM_QUIT)
                 done = true;
         }
+        if (done)
+            break;
 
-        if (SDL_GetWindowFlags(window) & SDL_WINDOW_MINIMIZED) {
-            SDL_Delay(10);
+        if (IsIconic(window)) {
+            Sleep(10);
             continue;
         }
 
         ImGui_ImplOpenGL3_NewFrame();
-        ImGui_ImplSDL3_NewFrame();
+        ImGui_ImplWin32_NewFrame();
         ImGui::NewFrame();
 
         draw_ui();
@@ -520,7 +607,7 @@ int main(int, char**) {
         glClearColor(clear_color.x, clear_color.y, clear_color.z, clear_color.w);
         glClear(GL_COLOR_BUFFER_BIT);
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
-        SDL_GL_SwapWindow(window);
+        SwapBuffers(g_hdc);
     }
 
     // Exit cleanup (best-effort), mirrors TUI behaviour.
@@ -535,11 +622,13 @@ int main(int, char**) {
     }
 
     ImGui_ImplOpenGL3_Shutdown();
-    ImGui_ImplSDL3_Shutdown();
+    ImGui_ImplWin32_Shutdown();
     ImGui::DestroyContext();
 
-    SDL_GL_DestroyContext(gl_context);
-    SDL_DestroyWindow(window);
-    SDL_Quit();
+    wglMakeCurrent(nullptr, nullptr);
+    wglDeleteContext(gl_context);
+    ReleaseDC(window, g_hdc);
+    DestroyWindow(window);
+    UnregisterClassW(wc.lpszClassName, hInstance);
     return 0;
 }

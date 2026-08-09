@@ -19,7 +19,6 @@ A desktop tool to visually browse and clean old [OpenCode](https://opencode.ai) 
 - [MinGW-w64](https://www.mingw-w64.org/) `g++` (tested with GCC 8.1).
 - Vendor libraries are **bundled in this repo**:
   - [Dear ImGui](https://github.com/ocornut/imgui) (`imgui/`)
-  - [SDL3](https://github.com/libsdl-org/SDL) (`third_party/SDL3/`)
   - sqlite3 dev lib (`C:\MinGW\opt\lib`, also used by OpenCode itself).
 
 The TUI also requires `ncursesw` (dev libs under `C:\MinGW\opt`).
@@ -30,13 +29,13 @@ The TUI also requires `ncursesw` (dev libs under `C:\MinGW\opt`).
 rem TUI (terminal app)
 build.bat
 
-rem GUI (SDL3 + OpenGL3 + ImGui)
+rem GUI (Win32 + OpenGL3 + ImGui)
 build_gui.bat
 ```
 
 Build output:
 - `opencode-session-manager.exe` — TUI
-- `dist\opencode-session-manager-gui.exe` — GUI (with `dist\SDL3.dll`)
+- `dist\opencode-session-manager-gui.exe` — GUI (**single file, no bundled DLLs**; only links Windows system libraries such as `opengl32.dll`)
 
 ## Run
 
@@ -73,4 +72,4 @@ opencode-session-manager-gui.exe
 
 [MIT](LICENSE) © [Linecos](https://github.com/Linecos)
 
-Bundled third-party libs keep their own licenses: Dear ImGui is MIT; SDL3 is Zlib.
+Bundled third-party libs keep their own licenses: Dear ImGui is MIT.
