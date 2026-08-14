@@ -5,6 +5,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
+#include <stdexcept>
 
 // ---------------------------------------------------------------------------
 // small path helpers
@@ -108,14 +109,37 @@ long long total_dir_size(const string& p) {
     return total;
 }
 
+static string win_error_text(DWORD code, const string& path) {
+    string msg;
+    switch (code) {
+    case 2:   msg = "The system cannot find the file specified"; break;
+    case 3:   msg = "The system cannot find the path specified"; break;
+    case 5:   msg = "Access is denied"; break;
+    case 13:  msg = "The data is invalid"; break;
+    case 32:  msg = "The process cannot access the file because it is being used by another process"; break;
+    case 145: msg = "The directory is not empty"; break;
+    case 183: msg = "Cannot create a file when that file already exists"; break;
+    default:  msg = "Unknown error"; break;
+    }
+    return "[WinError " + std::to_string((unsigned long)code) + "] " + msg + " :'" + path + "'";
+}
+
 void remove_tree(const string& p) {
 #ifdef _WIN32
     for (auto& n : list_children(p)) {
         string child = path_join(p, n);
-        if (is_dir(child)) remove_tree(child);
-        else DeleteFileA(child.c_str());
+        if (is_dir(child)) {
+            remove_tree(child);
+        } else if (!DeleteFileA(child.c_str())) {
+            throw std::runtime_error(win_error_text(GetLastError(), child));
+        }
     }
-    RemoveDirectoryA(p.c_str());
+    if (!RemoveDirectoryA(p.c_str())) {
+        throw std::runtime_error(win_error_text(GetLastError(), p));
+    }
+    if (path_exists(p)) {
+        throw std::runtime_error("path still exists after delete: '" + p + "'");
+    }
 #else
     (void)p;
 #endif

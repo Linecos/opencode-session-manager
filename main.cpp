@@ -98,7 +98,7 @@ private:
         init_pair(COLOR_WARN, COLOR_RED, -1);
         init_pair(COLOR_DIM, 8, -1);
         init_pair(COLOR_TAB_ACTIVE, COLOR_BLACK, COLOR_GREEN);
-        init_pair(COLOR_TAB_INACTIVE, 8, -1);
+        init_pair(COLOR_TAB_INACTIVE, COLOR_BLACK, COLOR_CYAN);
         cbreak();
         noecho();
         keypad(stdscr, TRUE);
@@ -239,8 +239,9 @@ private:
         int h = 0, w = 0;
         getmaxyx(stdscr, h, w);
         (void)h;
-        WINDOW* bar = newwin(1, w, 0, 0);
-        wbkgd(bar, ' ' | COLOR_PAIR(COLOR_HEADER));
+
+        wattrset(stdscr, A_NORMAL);
+        mvwaddswstr(stdscr, 0, 0, wstring((size_t)w, L' '));
 
         wchar_t buf[64];
         swprintf(buf, 64, L" Sessions (%d) ", (int)sessions.size());
@@ -254,17 +255,15 @@ private:
             {tab_p, tab == ACTIVE_TAB_SNAPSHOTS}
         };
         for (auto& t : tabs) {
-            int attr = t.active ? COLOR_PAIR(COLOR_TAB_ACTIVE) : COLOR_PAIR(COLOR_TAB_INACTIVE);
-            wattrset(bar, attr);
-            waddswstr(bar, t.label);
+            wattrset(stdscr, t.active ? A_REVERSE : A_NORMAL);
+            mvwaddswstr(stdscr, 0, off, t.label);
             off += (int)t.label.size();
         }
         if (off < w - 1) {
-            wattrset(bar, COLOR_PAIR(COLOR_HEADER));
-            waddwstr(bar, wstring((size_t)(w - off - 1), L' ').c_str());
+            wattrset(stdscr, A_NORMAL);
+            mvwaddswstr(stdscr, 0, off, wstring((size_t)(w - off - 1), L' '));
         }
-        wnoutrefresh(bar);
-        delwin(bar);
+        wattrset(stdscr, A_NORMAL);
     }
 
     void adjust_scroll(int visible) {
@@ -374,15 +373,21 @@ private:
         int dx = (w - dialog_w) / 2;
         if (dy < 0) dy = 0;
         if (dx < 0) dx = 0;
-        WINDOW* dlg = newwin(dialog_h, dialog_w, dy, dx);
-        wbkgd(dlg, ' ' | (COLOR_PAIR(COLOR_WARN) | A_BOLD));
-        box(dlg, 0, 0);
-        swprintf(buf, sizeof(buf), L" Delete %d item(s)?", selected_count);
-        mvwaddswstr(dlg, 1, 2, buf);
-        mvwaddswstr(dlg, 2, 2, L" This will permanently remove " + detail + L".");
-        mvwaddswstr(dlg, 3, 4, L"[Y] Confirm    [N] Cancel");
-        wnoutrefresh(dlg);
-        delwin(dlg);
+
+        wattrset(stdscr, COLOR_PAIR(COLOR_WARN) | A_BOLD);
+        for (int y = dy; y < dy + dialog_h; y++)
+            mvwaddswstr(stdscr, y, dx, wstring((size_t)dialog_w, L' '));
+        mvwaddswstr(stdscr, dy, dx, L"\u250c" + wstring((size_t)dialog_w - 2, L'\u2500') + L"\u2510");
+        mvwaddswstr(stdscr, dy + dialog_h - 1, dx, L"\u2514" + wstring((size_t)dialog_w - 2, L'\u2500') + L"\u2518");
+        for (int y = dy + 1; y < dy + dialog_h - 1; y++) {
+            mvwaddswstr(stdscr, y, dx, L"\u2502");
+            mvwaddswstr(stdscr, y, dx + dialog_w - 1, L"\u2502");
+        }
+        swprintf(buf, 96, L" Delete %d item(s)?", selected_count);
+        mvwaddswstr(stdscr, dy + 1, dx + 2, buf);
+        mvwaddswstr(stdscr, dy + 2, dx + 2, L" This will permanently remove " + detail + L".");
+        mvwaddswstr(stdscr, dy + 3, dx + 4, L"[Y] Confirm    [N] Cancel");
+        wattrset(stdscr, A_NORMAL);
     }
 };
 

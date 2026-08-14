@@ -97,6 +97,7 @@ static std::vector<Session> g_sessions;
 static std::vector<Snapshot> g_snapshots;
 static std::set<int> g_selected;
 static string g_message;
+static string g_error;
 static bool g_cleanup_on_exit = true;
 static bool g_confirm_delete = false;
 
@@ -106,6 +107,7 @@ static void refresh_data(bool keep_selection) {
     if (!keep_selection) {
         g_selected.clear();
         g_message.clear();
+        g_error.clear();
     }
 }
 
@@ -135,8 +137,10 @@ static void do_delete() {
             if (!orphans.empty())
                 g_message += ", cleaned " + std::to_string(orphans.size()) + " orphan diff(s)";
             refresh_data(true);
+            g_selected.clear();
         } catch (const std::exception& e) {
             g_message = string("Error: ") + e.what();
+            g_error = g_message;
         }
     } else {
         std::vector<string> dirs;
@@ -151,8 +155,10 @@ static void do_delete() {
             g_message = "Removed " + std::to_string(dirs.size()) + " snapshot(s), freed ";
             g_message += u8fmt_size(total_size);
             refresh_data(true);
+            g_selected.clear();
         } catch (const std::exception& e) {
             g_message = string("Error: ") + e.what();
+            g_error = g_message;
         }
     }
 }
@@ -359,6 +365,30 @@ static void draw_confirm_modal() {
 }
 
 // ---------------------------------------------------------------------------
+// UI: in-app error modal (shown when a delete fails; not a Windows MessageBox)
+// ---------------------------------------------------------------------------
+static void draw_error_modal() {
+    if (g_error.empty()) return;
+    ImGui::OpenPopup("Error");
+    ImVec2 center = ImGui::GetMainViewport()->GetCenter();
+    ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+
+    bool open = true;
+    if (ImGui::BeginPopupModal("Error", &open,
+                               ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoMove)) {
+        ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "%s", g_error.c_str());
+        ImGui::Spacing();
+        ImGui::Separator();
+        if (ImGui::Button("OK", ImVec2(140, 0))) {
+            g_error.clear();
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
+    if (!open) g_error.clear();
+}
+
+// ---------------------------------------------------------------------------
 // UI: main window
 // ---------------------------------------------------------------------------
 static void draw_ui() {
@@ -397,9 +427,15 @@ static void draw_ui() {
     // Status line
     ImGui::Spacing();
     ImGui::Separator();
-    ImGui::TextUnformatted(g_message.empty() ? "Ready." : g_message.c_str());
+    ImGui::Spacing();
+    bool is_err = g_message.rfind("Error", 0) == 0;
+    if (is_err)
+        ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "%s", g_message.c_str());
+    else
+        ImGui::TextUnformatted(g_message.empty() ? "Ready." : g_message.c_str());
 
     draw_confirm_modal();
+    draw_error_modal();
 
     ImGui::End();
 }

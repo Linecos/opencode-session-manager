@@ -6,10 +6,13 @@ setlocal
 set GCC=C:\MinGW\bin\g++
 set INCS=-I"C:\MinGW\opt\include"
 set LIBS=-L"C:\MinGW\opt\lib" -lncursesw -lsqlite3
+set OUT=dist
 
-%GCC% -std=c++17 -O2 -Wall -static -DNCURSES_WIDECHAR %INCS% main.cpp opencode_data.cpp %LIBS% -o opencode-session-manager.exe
+if not exist "%OUT%" mkdir "%OUT%"
+
+%GCC% -std=c++17 -O2 -Wall -static -DNCURSES_WIDECHAR %INCS% main.cpp opencode_data.cpp %LIBS% -o "%OUT%\opencode-session-manager.exe"
 if %errorlevel%==0 (
-    echo Build OK: opencode-session-manager.exe
+    echo Build OK: %OUT%\opencode-session-manager.exe
 ) else (
     echo Build FAILED
 )
