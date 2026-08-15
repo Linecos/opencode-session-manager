@@ -98,6 +98,8 @@ static std::vector<Snapshot> g_snapshots;
 static std::set<int> g_selected;
 static string g_message;
 static string g_error;
+static string g_toast;
+static double g_toast_expire = 0.0;
 static bool g_cleanup_on_exit = true;
 static bool g_confirm_delete = false;
 
@@ -238,6 +240,9 @@ static void draw_sessions_tab() {
             if (ImGui::SmallButton(bid)) {
                 ImGui::SetClipboardText(s.id.c_str());
                 g_message = "Copied session id to clipboard";
+                g_toast = "Session id copied to clipboard: " + s.id;
+                if (g_toast.size() > 64) g_toast = g_toast.substr(0, 61) + "...";
+                g_toast_expire = ImGui::GetTime() + 2.0;
             }
             ImGui::SameLine();
             snprintf(bid, sizeof(bid), "jump##j%zu", i);
@@ -389,6 +394,43 @@ static void draw_error_modal() {
 }
 
 // ---------------------------------------------------------------------------
+// UI: transient toast (bottom-center, auto-dismisses)
+// Drawn directly on the foreground draw list so it re-appears on every trigger.
+// ---------------------------------------------------------------------------
+static void draw_toast() {
+    if (g_toast.empty()) return;
+    double now = ImGui::GetTime();
+    if (now > g_toast_expire + 0.5) {
+        g_toast.clear();
+        return;
+    }
+    float fade = (float)(g_toast_expire - now);
+    if (fade < 0.0f) fade = 0.0f;
+    float alpha = fade < 0.5f ? fade / 0.5f : 1.0f;
+    if (alpha <= 0.0f) {
+        g_toast.clear();
+        return;
+    }
+
+    ImDrawList* dl = ImGui::GetForegroundDrawList();
+    ImFont* font = ImGui::GetFont();
+    float font_size = ImGui::GetFontSize();
+    ImVec2 text_size = font->CalcTextSizeA(font_size, FLT_MAX, 0.0f, g_toast.c_str());
+    const float pad_x = 14.0f, pad_y = 8.0f;
+    ImVec2 box_min(ImGui::GetIO().DisplaySize.x * 0.5f - text_size.x * 0.5f - pad_x,
+                   ImGui::GetIO().DisplaySize.y - 58.0f);
+    ImVec2 box_max(box_min.x + text_size.x + pad_x * 2.0f, box_min.y + text_size.y + pad_y * 2.0f);
+
+    dl->AddRectFilled(box_min, box_max,
+                      ImGui::ColorConvertFloat4ToU32(ImVec4(0.08f, 0.10f, 0.09f, 0.92f * alpha)), 6.0f);
+    dl->AddRect(box_min, box_max,
+                ImGui::ColorConvertFloat4ToU32(ImVec4(0.5f, 0.8f, 0.5f, alpha)), 6.0f);
+    dl->AddText(ImVec2(box_min.x + pad_x, box_min.y + pad_y),
+                ImGui::ColorConvertFloat4ToU32(ImVec4(0.6f, 1.0f, 0.6f, alpha)),
+                g_toast.c_str());
+}
+
+// ---------------------------------------------------------------------------
 // UI: main window
 // ---------------------------------------------------------------------------
 static void draw_ui() {
@@ -438,6 +480,7 @@ static void draw_ui() {
     draw_error_modal();
 
     ImGui::End();
+    draw_toast();
 }
 
 // ---------------------------------------------------------------------------
@@ -459,7 +502,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
         PostQuitMessage(0);
         return 0;
     default:
-        return DefWindowProc(hwnd, msg, wParam, lParam);
+        return DefWindowProcW(hwnd, msg, wParam, lParam);
     }
 }
 
@@ -544,13 +587,16 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
     wc.style         = CS_CLASSDC;
     wc.lpfnWndProc   = WndProc;
     wc.hInstance     = hInstance;
+    wc.hIcon         = LoadIconW(hInstance, MAKEINTRESOURCEW(1));
+    wc.hIconSm       = (HICON)LoadImageW(hInstance, MAKEINTRESOURCEW(1),
+                                         IMAGE_ICON, 16, 16, LR_DEFAULTCOLOR);
     wc.lpszClassName = L"OpenCodeSessionManagerWnd";
     if (!RegisterClassExW(&wc)) {
         fprintf(stderr, "Error: RegisterClassExW() failed.\n");
         return 1;
     }
 
-    HWND window = CreateWindowExW(0, wc.lpszClassName, L"OpenCode Session Manager",
+    HWND window = CreateWindowExW(0, wc.lpszClassName, L"opencode session manager",
                                   WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, 1100, 720,
                                   nullptr, nullptr, hInstance, nullptr);
     if (window == nullptr) {
@@ -558,6 +604,12 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
         return 1;
     }
     g_hwnd = window;
+
+    HICON hIcon = LoadIconW(hInstance, MAKEINTRESOURCEW(1));
+    if (hIcon) {
+        SendMessageW(window, WM_SETICON, ICON_BIG, (LPARAM)hIcon);
+        SendMessageW(window, WM_SETICON, ICON_SMALL, (LPARAM)hIcon);
+    }
 
     HGLRC gl_context = create_gl_context(window);
     if (gl_context == nullptr) {
