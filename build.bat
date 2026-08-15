@@ -6,7 +6,7 @@ setlocal
 set GCC=C:\MinGW\bin\g++
 set WINDRES=C:\MinGW\bin\windres
 set INCS=-I"C:\MinGW\opt\include"
-set LIBS=-L"C:\MinGW\opt\lib" -lncursesw -lsqlite3
+set LIBS=-L"C:\MinGW\opt\lib" -lncursesw -lsqlite3 -luser32
 set OUT=dist
 
 if not exist "%OUT%" mkdir "%OUT%"

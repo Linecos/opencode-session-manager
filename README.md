@@ -52,6 +52,8 @@ opencode-session-manager-gui.exe
 
 ### TUI key bindings
 
+The bottom info line always shows the current row's session id (and the resume command).
+
 | Key | Action |
 |-----|--------|
 | `up/down` / `j` / `k` | Move cursor |
@@ -59,6 +61,8 @@ opencode-session-manager-gui.exe
 | `Ctrl+A` | Select all |
 | `Ctrl+D` | Clear selection |
 | `Tab` | Switch view (Sessions / Snapshots) |
+| `c` | Copy the resume command `opencode -s <id>` to the clipboard |
+| `o` | Resume the cursor session in a new console |
 | `Enter` | Delete selected (confirm with `y`) |
 | `q` / `Esc` | Quit |
 

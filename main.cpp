@@ -12,6 +12,8 @@
 //   up/down, j/k   move cursor          Space        toggle selection
 //   Ctrl+A         select all           Ctrl+D       clear selection
 //   Tab            switch view          Enter        delete selected (confirm)
+//   c              copy resume command (opencode -s <id>)
+//   o              open/resume session in a new console
 //   Q / Esc        quit
 
 #define NCURSES_WIDECHAR 1
@@ -19,6 +21,7 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <cstring>
 #include <set>
 #include <string>
 #include <vector>
@@ -53,6 +56,63 @@ static void mvwaddswstr(WINDOW* win, int y, int x, const wstring& s) {
     wmove(win, y, x);
     waddswstr(win, s);
 }
+
+#ifdef _WIN32
+// Put UTF-16 text on the Windows clipboard (so pasting into a terminal works).
+static void copy_to_clipboard(const string& text) {
+    if (!OpenClipboard(nullptr)) return;
+    EmptyClipboard();
+    wstring wtext = utf8_to_wide(text);
+    SIZE_T bytes = (wtext.size() + 1) * sizeof(wchar_t);
+    HGLOBAL hg = GlobalAlloc(GMEM_MOVEABLE, bytes);
+    if (hg) {
+        void* dst = GlobalLock(hg);
+        if (dst) {
+            memcpy(dst, wtext.c_str(), bytes);
+            GlobalUnlock(hg);
+            SetClipboardData(CF_UNICODETEXT, hg);
+        }
+    }
+    CloseClipboard();
+}
+
+// Resume a session: open a new console in the session's worktree (if it still
+// exists) and run `opencode -s <session_id>` inside it.
+static bool launch_opencode_session(const string& session_id, const string& worktree) {
+    wstring cmd = L"cmd.exe /c opencode -s \"" + utf8_to_wide(session_id) + L"\"";
+    std::vector<wchar_t> cmdline(cmd.begin(), cmd.end());
+    cmdline.push_back(L'\0');
+
+    STARTUPINFOW si;
+    PROCESS_INFORMATION pi;
+    ZeroMemory(&si, sizeof(si));
+    si.cb = sizeof(si);
+    si.dwFlags = STARTF_USESHOWWINDOW;
+    si.wShowWindow = SW_SHOW;
+    ZeroMemory(&pi, sizeof(pi));
+
+    wstring wd;
+    if (is_dir(worktree)) wd = utf8_to_wide(worktree);
+
+    BOOL ok = CreateProcessW(
+        nullptr,                      // application name
+        &cmdline[0],                  // command line
+        nullptr, nullptr, FALSE,
+        CREATE_NEW_CONSOLE,           // give it its own console window
+        nullptr,
+        wd.empty() ? nullptr : wd.c_str(),
+        &si, &pi);
+
+    if (ok) {
+        CloseHandle(pi.hThread);
+        CloseHandle(pi.hProcess);
+        return true;
+    }
+    return false;
+}
+#else
+static bool launch_opencode_session(const string&, const string&) { return false; }
+#endif
 
 // ---------------------------------------------------------------------------
 // TUI application
@@ -144,8 +204,36 @@ private:
             for (int i = 0; i < (int)list_size(); i++) selected.insert(i);
         } else if (key == 4) {                   // Ctrl+D
             selected.clear();
+        } else if (key == 'c' || key == 'C') {
+            copy_command();
+        } else if (key == 'o' || key == 'O') {
+            jump_session();
         } else if (key == 10 || key == 13 || key == KEY_ENTER) {
             if (!selected.empty()) confirm_mode = true;
+        }
+    }
+
+    void copy_command() {
+        if (tab == ACTIVE_TAB_SESSIONS) {
+            if (sessions.empty()) return;
+            string cmd = "opencode -s " + sessions[cursor].id;
+            copy_to_clipboard(cmd);
+            message = "Copied: " + cmd;
+        } else {
+            message = "Resume command copy is only available for sessions.";
+        }
+    }
+
+    void jump_session() {
+        if (tab == ACTIVE_TAB_SESSIONS) {
+            if (sessions.empty()) return;
+            const Session& s = sessions[cursor];
+            if (launch_opencode_session(s.id, s.worktree))
+                message = "Resumed session " + s.id;
+            else
+                message = "Failed to launch opencode";
+        } else {
+            message = "Jump is only available for sessions.";
         }
     }
 
@@ -198,10 +286,30 @@ private:
         draw_tab_bar();
 
         int list_start_y = 2;
-        int list_end_y = h - 3;
+        int list_end_y = h - 4;
 
         if (tab == ACTIVE_TAB_SESSIONS) draw_session_list(list_start_y, list_end_y, w);
         else draw_snapshot_list(list_start_y, list_end_y, w);
+
+        // current-row info line (always shows the id / command of the cursor row)
+        int info_y = h - 3;
+        if (tab == ACTIVE_TAB_SESSIONS) {
+            if (!sessions.empty()) {
+                const Session& s = sessions[cursor];
+                string info = "Session ID: " + s.id;
+                wattrset(stdscr, COLOR_PAIR(COLOR_DIM));
+                mvwaddswstr(stdscr, info_y, 0, truncate(utf8_to_wide(info), w > 0 ? (size_t)w : 0));
+                wattrset(stdscr, A_NORMAL);
+            }
+        } else {
+            if (!snapshots.empty()) {
+                const Snapshot& s = snapshots[cursor];
+                string info = "Snapshot: " + wide_to_utf8(s.name) + "  |  worktree: " + s.worktree;
+                wattrset(stdscr, COLOR_PAIR(COLOR_DIM));
+                mvwaddswstr(stdscr, info_y, 0, truncate(utf8_to_wide(info), w > 0 ? (size_t)w : 0));
+                wattrset(stdscr, A_NORMAL);
+            }
+        }
 
         // help bar
         int help_y = h - 2;
@@ -214,7 +322,7 @@ private:
             wchar_t hb[64];
             swprintf(hb, 64, L" Selected: %d/%d ", (int)selected.size(), (int)list_size());
             help_text = L" " + wstring(L"up/down:Move  Space:Select  Ctrl+A:All  Ctrl+D:None  "
-                                      L"Tab:Switch View  Enter:Delete  Q:Quit  |") + hb;
+                                      L"c:Copy  o:Jump  Tab:Switch View  Enter:Delete  Q:Quit  |") + hb;
         }
         waddswstr(help_win, truncate(help_text, (size_t)w));
         wnoutrefresh(help_win);
