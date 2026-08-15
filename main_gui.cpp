@@ -202,7 +202,7 @@ static void draw_sessions_tab() {
         return;
     }
 
-    ImGui::TextDisabled("Click [copy] to copy a session id, [jump] to resume it in opencode.");
+    ImGui::TextDisabled("Click [copy] to copy the resume command, [jump] to resume it in opencode.");
     ImGui::Spacing();
 
     if (ImGui::BeginTable("sessions", 7,
@@ -238,9 +238,10 @@ static void draw_sessions_tab() {
             char bid[64];
             snprintf(bid, sizeof(bid), "copy##c%zu", i);
             if (ImGui::SmallButton(bid)) {
-                ImGui::SetClipboardText(s.id.c_str());
-                g_message = "Copied session id to clipboard";
-                g_toast = "Session id copied to clipboard: " + s.id;
+                string cmd = "opencode -s " + s.id;
+                ImGui::SetClipboardText(cmd.c_str());
+                g_message = "Copied resume command to clipboard";
+                g_toast = "Command copied: " + cmd;
                 if (g_toast.size() > 64) g_toast = g_toast.substr(0, 61) + "...";
                 g_toast_expire = ImGui::GetTime() + 2.0;
             }

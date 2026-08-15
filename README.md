@@ -8,7 +8,7 @@ A desktop tool to visually browse and clean old [OpenCode](https://opencode.ai) 
 - Switch between **Sessions** and **Snapshots** views.
 - Select multiple items, then delete them (with a confirmation dialog).
 - **GUI extras**:
-  - Copy a session id to the clipboard with one click.
+  - Copy the resume command `opencode -s <id>` to the clipboard with one click.
   - **Jump** button — resumes a session in a new console via `opencode -s <id>` (in its worktree if it still exists).
   - Chinese/CJK font support (loads Microsoft YaHei etc. automatically).
 - Cleanup of orphan `session_diff/*.json` files (on exit, toggleable in the GUI).
@@ -65,7 +65,7 @@ opencode-session-manager-gui.exe
 ### GUI usage
 
 - Menubar **View** buttons switch between Sessions / Snapshots.
-- Per row: **copy** copies the session id; **jump** resumes the session in a new terminal.
+- Per row: **copy** copies the resume command `opencode -s <id>`; **jump** resumes the session in a new terminal.
 - Toolbar: **Refresh**, **Select All**, **Clear Sel**, **Delete Selected**, and a **Cleanup orphan diffs on exit** checkbox.
 
 ## License
