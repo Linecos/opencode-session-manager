@@ -1,9 +1,19 @@
 # Build outputs
 *.exe
+*.o
+*.obj
 dist/
+build/
+out/
 
-# IDE / virtualenv
+# Test scratch directory (build_tests.bat / mingw32-make test)
+test-scratch/
+
+# Editors / IDE
 .idea/
+.vscode/
+*.swp
+*~
 
 # OS
 Thumbs.db

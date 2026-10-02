@@ -1,8 +1,10 @@
+#include "version.h"
+
 1 ICON "opencode.ico"
 
 1 VERSIONINFO
-FILEVERSION 0,1,1,0
-PRODUCTVERSION 0,1,1,0
+FILEVERSION OPENCODE_SM_VERSION_MAJOR,OPENCODE_SM_VERSION_MINOR,OPENCODE_SM_VERSION_PATCH,0
+PRODUCTVERSION OPENCODE_SM_VERSION_MAJOR,OPENCODE_SM_VERSION_MINOR,OPENCODE_SM_VERSION_PATCH,0
 FILEOS 0x00040004L
 FILETYPE 0x1
 BEGIN
@@ -12,11 +14,11 @@ BEGIN
         BEGIN
             VALUE "CompanyName", "OpenCode Session Manager"
             VALUE "FileDescription", "OpenCode Session Manager"
-            VALUE "FileVersion", "0.1.1"
+            VALUE "FileVersion", OPENCODE_SM_VERSION_STRING
             VALUE "InternalName", "opencode-session-manager"
             VALUE "OriginalFilename", "opencode-session-manager.exe"
             VALUE "ProductName", "OpenCode Session Manager"
-            VALUE "ProductVersion", "0.1.1"
+            VALUE "ProductVersion", OPENCODE_SM_VERSION_STRING
         END
     END
     BLOCK "VarFileInfo"

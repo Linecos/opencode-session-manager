@@ -9,28 +9,49 @@
 #include <string>
 #include <vector>
 
-#ifdef _WIN32
-#include <sys/stat.h>
-#include <windows.h>
-#endif
-
 using std::string;
 using std::wstring;
 
 // ---------------------------------------------------------------------------
-// small path helpers (std::filesystem is broken on GCC 8/MinGW)
+// Path helpers.
+//
+// Every helper takes/returns UTF-8 and goes through the wide-character (W)
+// Win32 API internally, so paths containing CJK (or any non-ASCII) characters
+// work: a Chinese %USERPROFILE%, a Chinese project worktree, a Chinese snapshot
+// name.  The previous ANSI (A) implementation silently returned empty listings
+// and failed to delete for those paths.
+//
+// std::filesystem is intentionally *not* used: this project still targets
+// GCC 8 / MinGW-w64, where <filesystem> is unusable.
 // ---------------------------------------------------------------------------
 string path_join(const string& base, const string& name);
 bool path_exists(const string& p);
 bool is_dir(const string& p);
+bool is_file(const string& p);
+bool make_dir(const string& p);   // single level, true if it exists afterwards
 std::vector<string> list_children(const string& p);
 std::vector<string> list_child_dirs(const string& p);
 std::vector<string> list_child_files(const string& p);
 string file_extension(const string& path);
 string file_stem(const string& path);
 long long total_dir_size(const string& p);
-void remove_tree(const string& p);
-void delete_file(const string& p);
+
+// Both of these throw std::runtime_error on failure (nothing is silently
+// swallowed any more).  See "Deletion policy" below for where the data goes.
+void remove_tree(const string& p);   // directory tree
+void delete_file(const string& p);   // single file
+
+// ---------------------------------------------------------------------------
+// Deletion policy
+//
+// By default removals are sent to the Windows Recycle Bin (FOF_ALLOWUNDO), so a
+// wrong click is recoverable.  Set the environment variable
+// OPENCODE_SM_NO_RECYCLE=1, or call set_delete_to_recycle(false), to force
+// permanent deletion (used by the test suite).
+// ---------------------------------------------------------------------------
+void set_delete_to_recycle(bool on);
+bool delete_to_recycle();
+bool last_delete_went_to_recycle();   // how the most recent removal was done
 
 // ---------------------------------------------------------------------------
 // Config / paths
@@ -48,8 +69,14 @@ wstring utf8_to_wide(const string& s);
 string wide_to_utf8(const wstring& w);
 
 // ---------------------------------------------------------------------------
-// Formatting helpers (mirror format_time / format_size / truncate)
+// Text helpers
 // ---------------------------------------------------------------------------
+// Codepoint-aware ellipsis ("abc…"): never splits a multi-byte UTF-8 sequence.
+string utf8_ellipsize(const string& s, size_t max_codepoints);
+// ASCII-case-insensitive substring test; safe on UTF-8 (non-ASCII bytes are
+// compared verbatim, which is what we want for CJK).
+bool utf8_icontains(const string& haystack, const string& needle);
+
 wstring format_time(long long ts_ms);
 wstring format_size(long long size_bytes);
 wstring truncate(const wstring& text, size_t width);
@@ -73,6 +100,7 @@ struct Snapshot {
     string id;            // project_id / directory name
     string path;          // directory on disk
     long long size = 0;
+    bool size_known = true;   // false => size not computed yet (lazy mode)
     string worktree;
     wstring name;
     bool active_sessions = false;
@@ -83,7 +111,31 @@ struct Snapshot {
 // ---------------------------------------------------------------------------
 sqlite3* open_db(const string& path);
 string col_text(sqlite3_stmt* st, int i);
+
 std::vector<Session> load_sessions(const string& path);
-std::vector<Snapshot> load_snapshots(const string& path, const string& snap_dir);
+
+// with_sizes == false leaves Snapshot::size at 0 and size_known at false, so a
+// UI can fill the sizes in lazily instead of blocking on a full disk walk.
+std::vector<Snapshot> load_snapshots(const string& path, const string& snap_dir,
+                                     bool with_sizes = true);
+
+// Returns the number of rows actually deleted.  Throws on any SQLite error
+// (including SQLITE_BUSY) -- callers must not assume success.
 int delete_sessions(const string& path, const std::vector<string>& ids);
-std::vector<string> cleanup_orphan_diffs(const string& path, const string& diff_dir);
+
+// Moves orphan session_diff/*.json files (no matching session row) to the
+// Recycle Bin.  Returns the session ids whose diff was removed; files that
+// could not be removed are appended to `failed` when that pointer is given.
+std::vector<string> cleanup_orphan_diffs(const string& path, const string& diff_dir,
+                                         std::vector<string>* failed = nullptr);
+
+// ---------------------------------------------------------------------------
+// Platform actions (shared by TUI and GUI, previously duplicated)
+// ---------------------------------------------------------------------------
+// Opens a new console and runs `opencode -s <id>` inside the session's worktree.
+bool launch_opencode_session(const string& session_id, const string& worktree,
+                             string* error = nullptr);
+// Opens a folder (or selects a file) in Windows Explorer.
+bool reveal_in_explorer(const string& path, string* error = nullptr);
+// Puts UTF-8 text on the clipboard as CF_UNICODETEXT.
+bool set_clipboard_text(const string& text, string* error = nullptr);
